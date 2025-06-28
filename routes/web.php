@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\StripePaymentController;
+use App\Http\Controllers\API\StripePaymentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {

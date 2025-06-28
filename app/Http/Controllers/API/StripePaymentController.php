@@ -1,16 +1,16 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\API;
 
+use App\Http\Controllers\Controller;
 use App\Http\Services\Stripe\StripeService;
 use App\Models\Payment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Stripe\Stripe;
 
 class StripePaymentController extends Controller
 {
-    protected $stripeService;
+    protected StripeService $stripeService;
 
     public function __construct(StripeService $stripeService)
     {
@@ -59,9 +59,10 @@ class StripePaymentController extends Controller
                 'client_secret' => $paymentIntent->client_secret,
                 'payment_intent_id' => $paymentIntent->id,
             ]);
+
         } catch (\Exception $e) {
             Log::error('Payment intent creation failed: ' . $e->getMessage());
-
+            
             return response()->json([
                 'error' => 'Failed to create payment intent'
             ], 500);
@@ -79,10 +80,10 @@ class StripePaymentController extends Controller
 
         try {
             $paymentIntent = $this->stripeService->retrievePaymentIntent($request->payment_intent_id);
-
+            
             // Update payment record
             $payment = Payment::where('stripe_payment_intent_id', $paymentIntent->id)->first();
-
+            
             if ($payment) {
                 $payment->update([
                     'status' => $paymentIntent->status,
@@ -92,6 +93,7 @@ class StripePaymentController extends Controller
             }
 
             return view('payments.success', compact('payment', 'paymentIntent'));
+
         } catch (\Exception $e) {
             Log::error('Payment success handling failed: ' . $e->getMessage());
             return redirect()->route('payment.form')->with('error', 'Payment verification failed');
@@ -131,7 +133,7 @@ class StripePaymentController extends Controller
                 $paymentIntent = $event['data']['object'];
                 $this->handlePaymentIntentSucceeded($paymentIntent);
                 break;
-
+            
             case 'payment_intent.payment_failed':
                 $paymentIntent = $event['data']['object'];
                 $this->handlePaymentIntentFailed($paymentIntent);
@@ -147,13 +149,13 @@ class StripePaymentController extends Controller
     private function handlePaymentIntentSucceeded($paymentIntent)
     {
         $payment = Payment::where('stripe_payment_intent_id', $paymentIntent['id'])->first();
-
+        
         if ($payment) {
             $payment->update([
                 'status' => 'succeeded',
                 'paid_at' => now(),
             ]);
-
+            
             Log::info('Payment succeeded: ' . $paymentIntent['id']);
         }
     }
@@ -161,12 +163,12 @@ class StripePaymentController extends Controller
     private function handlePaymentIntentFailed($paymentIntent)
     {
         $payment = Payment::where('stripe_payment_intent_id', $paymentIntent['id'])->first();
-
+        
         if ($payment) {
             $payment->update([
                 'status' => 'failed',
             ]);
-
+            
             Log::info('Payment failed: ' . $paymentIntent['id']);
         }
     }
