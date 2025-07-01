@@ -18,9 +18,11 @@ class PaymentController extends Controller
         $this->stripeService = $stripeService;
     }
 
-    /**
-     * Create payment intent with customer handling
-     */
+    public function showPaymentForm()
+    {
+        return view('payments.form');
+    }
+
     public function createPaymentIntent(Request $request)
     {
         $request->validate([
@@ -33,9 +35,8 @@ class PaymentController extends Controller
         ]);
 
         DB::beginTransaction();
-        
+
         try {
-            // Prepare customer data
             $customerData = [
                 'name' => $request->customer_name,
                 'email' => $request->customer_email,
@@ -46,7 +47,6 @@ class PaymentController extends Controller
                 ],
             ];
 
-            // Create payment intent with customer
             $result = $this->stripeService->createPaymentIntentWithCustomer([
                 'amount' => $request->amount,
                 'currency' => $request->currency ?? 'usd',
@@ -60,7 +60,6 @@ class PaymentController extends Controller
             $paymentIntent = $result['payment_intent'];
             $customer = $result['customer'];
 
-            // Store payment record
             $payment = Payment::create([
                 'customer_id' => $customer->id,
                 'stripe_payment_intent_id' => $paymentIntent->id,
@@ -82,16 +81,45 @@ class PaymentController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Payment intent creation failed: ' . $e->getMessage());
-            
+
             return response()->json([
                 'error' => 'Failed to create payment intent'
             ], 500);
         }
     }
 
-    /**
-     * Get customer payment history
-     */
+    public function paymentSuccess(Request $request)
+    {
+        $request->validate([
+            'payment_intent_id' => 'required|string',
+        ]);
+
+        try {
+            $paymentIntent = $this->stripeService->retrievePaymentIntent($request->payment_intent_id);
+
+            $payment = Payment::where('stripe_payment_intent_id', $paymentIntent->id)->first();
+
+            if ($payment) {
+                $payment->update([
+                    'status' => $paymentIntent->status,
+                    'payment_method' => $paymentIntent->payment_method ?? null,
+                    'paid_at' => $paymentIntent->status === 'succeeded' ? now() : null,
+                ]);
+            }
+
+            return view('payments.success', compact('payment', 'paymentIntent'));
+
+        } catch (\Exception $e) {
+            Log::error('Payment success handling failed: ' . $e->getMessage());
+            return redirect()->route('payment.form')->with('error', 'Payment verification failed');
+        }
+    }
+
+    public function paymentCancel()
+    {
+        return view('payments.cancel');
+    }
+
     public function getCustomerPayments(Request $request)
     {
         $request->validate([
@@ -99,7 +127,7 @@ class PaymentController extends Controller
         ]);
 
         $customer = Customer::findByEmail($request->customer_email);
-        
+
         if (!$customer) {
             return response()->json([
                 'error' => 'Customer not found'
@@ -118,9 +146,6 @@ class PaymentController extends Controller
         ]);
     }
 
-    /**
-     * Get customer's saved payment methods
-     */
     public function getCustomerPaymentMethods(Request $request)
     {
         $request->validate([
@@ -129,7 +154,7 @@ class PaymentController extends Controller
 
         try {
             $customer = Customer::findByEmail($request->customer_email);
-            
+
             if (!$customer) {
                 return response()->json(['error' => 'Customer not found'], 404);
             }
@@ -149,9 +174,6 @@ class PaymentController extends Controller
         }
     }
 
-    /**
-     * Update customer information
-     */
     public function updateCustomer(Request $request, Customer $customer)
     {
         $request->validate([
@@ -163,13 +185,11 @@ class PaymentController extends Controller
         DB::beginTransaction();
 
         try {
-            // Update in Stripe
             $stripeCustomer = $this->stripeService->updateCustomer(
                 $customer->stripe_customer_id,
                 $request->only(['name', 'email', 'phone'])
             );
 
-            // Update in our database
             $customer->update([
                 'name' => $stripeCustomer->name,
                 'email' => $stripeCustomer->email,
@@ -186,7 +206,7 @@ class PaymentController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Customer update failed: ' . $e->getMessage());
-            
+
             return response()->json([
                 'error' => 'Failed to update customer'
             ], 500);

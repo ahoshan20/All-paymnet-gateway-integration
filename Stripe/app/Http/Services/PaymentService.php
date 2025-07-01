@@ -15,17 +15,12 @@ class PaymentService
         Stripe::setApiKey(config('services.stripe.secret'));
     }
 
-    /**
-     * Create or get existing customer
-     */
     public function createOrGetCustomer(array $customerData): array
     {
         try {
-            // Check if customer already exists in our database
             $existingCustomer = Customer::findByEmail($customerData['email']);
             
             if ($existingCustomer) {
-                // Verify customer still exists in Stripe
                 try {
                     $stripeCustomer = StripeCustomer::retrieve($existingCustomer->stripe_customer_id);
                     return [
@@ -33,12 +28,10 @@ class PaymentService
                         'stripe_customer' => $stripeCustomer
                     ];
                 } catch (ApiErrorException $e) {
-                    // Customer doesn't exist in Stripe anymore, create new one
                     $existingCustomer->delete();
                 }
             }
 
-            // Create new customer in Stripe
             $stripeCustomer = StripeCustomer::create([
                 'email' => $customerData['email'],
                 'name' => $customerData['name'] ?? null,
@@ -47,7 +40,6 @@ class PaymentService
                 'metadata' => $customerData['metadata'] ?? [],
             ]);
 
-            // Save customer in our database
             $customer = Customer::create([
                 'stripe_customer_id' => $stripeCustomer->id,
                 'name' => $stripeCustomer->name,
@@ -68,20 +60,15 @@ class PaymentService
         }
     }
 
-    /**
-     * Create payment intent with customer
-     */
     public function createPaymentIntentWithCustomer(array $data): array
     {
         try {
-            // Create or get customer
             $customerResult = $this->createOrGetCustomer($data['customer']);
             $customer = $customerResult['customer'];
             $stripeCustomer = $customerResult['stripe_customer'];
 
-            // Create payment intent
             $paymentIntent = PaymentIntent::create([
-                'amount' => $data['amount'] * 100, // Convert to cents
+                'amount' => $data['amount'] * 100,
                 'currency' => $data['currency'] ?? 'usd',
                 'customer' => $stripeCustomer->id,
                 'metadata' => array_merge($data['metadata'] ?? [], [
@@ -104,9 +91,15 @@ class PaymentService
         }
     }
 
-    /**
-     * Get customer's payment methods
-     */
+    public function retrievePaymentIntent(string $paymentIntentId)
+    {
+        try {
+            return PaymentIntent::retrieve($paymentIntentId);
+        } catch (ApiErrorException $e) {
+            throw new \Exception('Failed to retrieve payment intent: ' . $e->getMessage());
+        }
+    }
+
     public function getCustomerPaymentMethods(string $stripeCustomerId): array
     {
         try {
@@ -121,28 +114,12 @@ class PaymentService
         }
     }
 
-    /**
-     * Update customer information
-     */
     public function updateCustomer(string $stripeCustomerId, array $data): \Stripe\Customer
     {
         try {
             return StripeCustomer::update($stripeCustomerId, $data);
         } catch (ApiErrorException $e) {
             throw new \Exception('Failed to update customer: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Delete customer
-     */
-    public function deleteCustomer(string $stripeCustomerId): \Stripe\Customer
-    {
-        try {
-            // return StripeCustomer::delete($stripeCustomerId);
-            return StripeCustomer::retrieve($stripeCustomerId)->delete();
-        } catch (ApiErrorException $e) {
-            throw new \Exception('Failed to delete customer: ' . $e->getMessage());
         }
     }
 }
